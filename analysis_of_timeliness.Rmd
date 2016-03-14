@@ -1,0 +1,1074 @@
+---
+title: 'Analysing timeliness of transmission in the German surveillance system'
+author: "Jakob Schumacher"
+date: "22. Januar 2016"
+output: html_document
+---
+
+
+
+# About this document
+This document calculates and produces a manuscript to analyze the transmission delay in the German Surveillance System
+
+* Title of the publication: Timeliness in the German surveillance system for infectious diseases: Amendment of the infection protection act in 2013 decreased local transmission time to 1 day.
+* Authors of the publication: Jakob Schumacher, Michaela Diercke, Maelle Salmon, Irina Czogiel, Claus Herrmann, Andreas Gilsdorf
+
+
+```{r, echo=FALSE, eval=TRUE}
+setwd("S:/Projekte/FG32_Meldeverzug/Projekt_Publikation_Uebermittlungsverzug/Skripte")
+```
+
+### Loading packages
+```{r, warning=FALSE, message=FALSE, error=FALSE}
+if (!require("dplyr")) install.packages('dplyr', repos="http://cran.rstudio.com/"); require("dplyr") # Reshaping data
+if (!require("tidyr")) install.packages('tidyr', repos="http://cran.rstudio.com/"); require("tidyr") # Reshaping data
+if (!require("ggplot2")) install.packages('ggplot2', repos="http://cran.rstudio.com/"); require("ggplot2") # Graphics
+if (!require("scales")) install.packages('scales', repos="http://cran.rstudio.com/"); require("scales") # Graphics
+if (!require("grid")) install.packages('grid', repos="http://cran.rstudio.com/"); require("grid") 
+if (!require("knitr")) install.packages('knitr', repos="http://cran.rstudio.com/"); require("knitr") 
+if (!require("gridExtra")) install.packages('gridExtra', repos="http://cran.rstudio.com/"); require("gridExtra") 
+if (!require("timeDate")) install.packages('timeDate', repos="http://cran.rstudio.com/"); require("timeDate")
+if (!require("svglite")) install.packages('svglite', repos="http://cran.rstudio.com/"); require("svglite")
+if (!require("DT")) install.packages('DT'); require("DT") # HTML Output
+```
+
+
+### Setting Options and small functions
+```{r}
+options(dplyr.print_max = 1000) # Dplyr should pirnt out more lines
+knitr::opts_chunk$set(message=FALSE, warning=FALSE, results="asis") # Knitr chunk options
+
+# Helper functions
+select <- dplyr::select # Collision with MASS package
+"%nin%" <- function (x, table) match(x, table, nomatch = 0L) == 0L 
+
+```
+
+# Getting data
+### Querying database
+```{r}
+# if (!require("RODBC")) install.packages('RODBC'); require("RODBC")
+# # Creating a function for the query
+# getData <- function () {
+#   # hier wird definiert, wie man sich mit der Datenbank verbindet
+#   connection <- odbcDriverConnect("driver={SQL Server};server=sesql10;
+#                                   UID=SQL_SurvNet3_User;PWD=SurvNet3;
+#                                   Database=SurvNet3RKI2;", 
+#                                   readOnlyOptimize=TRUE)
+#   
+#   query <- "
+#   SELECT 
+#   CAST(DISEASE71.[OnsetOfDisease] AS DATE) AS [Erkrankungsbeginn]   
+#   ,CAST(NA1.[DiagnosedAt] AS DATE) AS [ArztDiagnoseAm]
+#   ,CAST(NA1.[NotifiedAt] AS DATE) AS [ArztMeldungImGA]
+#   ,CAST(NL1.[DiagnosedAt] AS DATE) AS [LaborDiagnoseAm]
+#   ,CAST(NL1.[NotifiedAt] AS DATE) AS [LaborMeldungImGA]
+#   ,CAST(N3.[DiagnosedAt] AS DATE) AS [EigeneErmittlungDiagnoseAm]
+#   ,CAST(N3.[NotifiedAt] AS DATE) AS [EigeneErmittlungMeldungImGA]
+#   ,CAST(N4.[DiagnosedAt] AS DATE) AS [GemeinschaftP8DiagnoseAm]
+#   ,CAST(N4.[NotifiedAt] AS DATE) AS [GemeinschaftP8MeldungImGA]
+#   ,CAST(N5.[DiagnosedAt] AS DATE) AS [WeiterleitungAnderesGADiagnoseAm]
+#   ,CAST(N5.[NotifiedAt] AS DATE) AS [WeiterleitungAnderesGAMeldungImGA]
+#   ,CAST(N6.[DiagnosedAt] AS DATE) AS [GemeinschaftP34DiagnoseAm]
+#   ,CAST(N6.[NotifiedAt] AS DATE) AS [GemeinschaftP34MeldungImGA]
+#   ,CAST(N99.[DiagnosedAt] AS DATE) AS [AndereDiagnoseAm]
+#   ,CAST(N99.[NotifiedAt] AS DATE) AS [AndereMeldungImGA]
+#   ,CAST(Nx.[DiagnosedAt] AS DATE) AS [UnbekannteMeldeArtDiagnoseAm]
+#   ,CAST(Nx.[NotifiedAt] AS DATE) AS [UnbekannteMeldeArtImGA]
+#   ,CAST(RT1.[TrackedAt] AS DATE) AS [ErstelltGA]
+#   ,CAST(DISEASE71.[ReportingDate] AS DATE) AS [Meldedatum]
+#   ,CAST(RT2.[TrackedAt] AS DATE) AS [ExportGA]
+#   ,CAST(RT3.[TrackedAt] AS DATE) AS [ImportLS]
+#   ,CAST(RT4.[TrackedAt] AS DATE) AS [ExportLS]
+#   ,CAST(RT5.[TrackedAt] AS DATE) AS [ImportRKI]
+#   
+#   -- Disease --
+#   ,M.[GuiText] AS [Disease]
+#   ,MD.[SpecimenName]
+#   ,DisPat.[Pathogen]
+#   ,[Meta].[ParseCatalogeItem](10001, DISEASE71.[CaseDefCategoryComputed]) AS [CaseDefCategoryComputed]
+#   
+#   -- Software --
+#   ,SoftwareGA.[SN2SN3] AS 'SoftwareSN2SN3GA'
+#   ,SoftwareGA.[SW] AS 'SoftwareGruppeGA'
+#   
+#   -- Place --
+#   ,(SELECT I.ItemName FROM Meta.Catalogue2Item AS C2I INNER JOIN Meta.Item AS I ON C2I.IdItem = I.IdItem WHERE C2I.IdCatalogue = 1012 AND I.IdIndex = DISEASE71.[ReportingState])  AS [ReportingStateName]
+#   ,(SELECT ISNULL(TS.[Name1],'')+ ISNULL('-'+[Name2],'') FROM [Meta].[TransmittingSite] TS WHERE TS.[CodeSite] = V.[CodeRecordOwner]) AS [MeldendesGA]
+#   
+#   -- Person --
+#   ,(SELECT I.ItemName FROM Meta.Catalogue2Item AS C2I INNER JOIN Meta.Item AS I ON C2I.IdItem = I.IdItem WHERE C2I.IdCatalogue = 3002 AND I.IdIndex = DISEASE71.[Sex])  AS [Geschlecht]
+#   ,DISEASE71.[AgeComputed] AS [Alter]
+#   
+#   -- Variables --
+#   ,V.[VersionNo]
+#   ,Vacc.[StatusVaccination] AS 'ImpfungStatus'
+#   ,(SELECT I.ItemName FROM Meta.Catalogue2Item AS C2I INNER JOIN Meta.Item AS I ON C2I.IdItem = I.IdItem WHERE C2I.IdCatalogue = 1009 AND I.IdIndex = DISEASE71.[StatusPatientSetting]) AS 'Status_33_36_42'
+#   
+#   
+#   -- Time variables --
+#   ,RD.[Week] AS 'Meldewoche'
+#   ,RD.[Month] AS 'Meldemonat'
+#   ,RD.[Quarter] AS 'Meldequartal'
+#   ,RD.[WeekYear] AS 'Meldejahr'
+#   
+#   FROM 
+#   [Data].[Version] AS V
+#   INNER JOIN [Data].[Disease71] AS DISEASE71 ON V.[IdVersion] = DISEASE71.[IdVersion]
+#   INNER JOIN Meta.DayTable RD ON RD.[IdDaySQL] = CAST(CAST(DISEASE71.[ReportingDate] AS FLOAT) AS INT)
+#   INNER JOIN Meta.[Type] M ON V.IdType = M.IdType
+#   INNER JOIN Meta.[Disease] MD ON V.IdType = MD.IdType AND V.IdSchema = MD.IdSchema
+#   OUTER APPLY [Data].[ExpandWithVaccination] (V.[IdVersion]) Vacc
+#   OUTER APPLY [Data].[ExpandWithDiseasePathogen](V.[IdVersion]) DisPat
+#   
+#   
+#   OUTER APPLY (SELECT [IdVersion], MIN([NotifiedAt]) AS [NotifiedAt], MIN([DiagnosedAt]) AS [DiagnosedAt] FROM [Data].[Disease71Notification] N WHERE V.[IdVersion] = N.[IdVersion] AND [NotificationType] = 1 GROUP BY [IdVersion]) NA1 	
+#   OUTER APPLY (SELECT [IdVersion], MIN([NotifiedAt]) AS [NotifiedAt], MIN([DiagnosedAt]) AS [DiagnosedAt] FROM [Data].[Disease71Notification] N WHERE V.[IdVersion] = N.[IdVersion] AND [NotificationType] = 2 GROUP BY [IdVersion]) NL1
+#   OUTER APPLY (SELECT [IdVersion], MIN([NotifiedAt]) AS [NotifiedAt], MIN([DiagnosedAt]) AS [DiagnosedAt] FROM [Data].[Disease71Notification] N WHERE V.[IdVersion] = N.[IdVersion] AND [NotificationType] = 3 GROUP BY [IdVersion]) N3
+#   OUTER APPLY (SELECT [IdVersion], MIN([NotifiedAt]) AS [NotifiedAt], MIN([DiagnosedAt]) AS [DiagnosedAt] FROM [Data].[Disease71Notification] N WHERE V.[IdVersion] = N.[IdVersion] AND [NotificationType] = 4 GROUP BY [IdVersion]) N4
+#   OUTER APPLY (SELECT [IdVersion], MIN([NotifiedAt]) AS [NotifiedAt], MIN([DiagnosedAt]) AS [DiagnosedAt] FROM [Data].[Disease71Notification] N WHERE V.[IdVersion] = N.[IdVersion] AND [NotificationType] = 5 GROUP BY [IdVersion]) N5
+#   OUTER APPLY (SELECT [IdVersion], MIN([NotifiedAt]) AS [NotifiedAt], MIN([DiagnosedAt]) AS [DiagnosedAt] FROM [Data].[Disease71Notification] N WHERE V.[IdVersion] = N.[IdVersion] AND [NotificationType] = 6 GROUP BY [IdVersion]) N6
+#   OUTER APPLY (SELECT [IdVersion], MIN([NotifiedAt]) AS [NotifiedAt], MIN([DiagnosedAt]) AS [DiagnosedAt] FROM [Data].[Disease71Notification] N WHERE V.[IdVersion] = N.[IdVersion] AND [NotificationType] = 999999 GROUP BY [IdVersion]) N99
+#   OUTER APPLY (SELECT [IdVersion], MIN([NotifiedAt]) AS [NotifiedAt], MIN([DiagnosedAt]) AS [DiagnosedAt] FROM [Data].[Disease71Notification] N WHERE V.[IdVersion] = N.[IdVersion] AND [NotificationType] IN (0,-1) GROUP BY [IdVersion]) Nx
+#   OUTER APPLY (SELECT [IdRecord], MIN([TrackedAt]) AS [TrackedAt] FROM [Data].[RecordTrack] RT WHERE V.[IdRecord] = RT.[IdRecord] AND [Action] = 1 GROUP BY [IdRecord]) RT1 
+#   OUTER APPLY (SELECT [IdRecord], MIN([TrackedAt]) AS [TrackedAt] FROM [Data].[RecordTrack] RT WHERE V.[IdRecord] = RT.[IdRecord] AND [Action] = 2 AND [CodeSite] LIKE '1.__._%' GROUP BY [IdRecord]) RT2 
+#   OUTER APPLY (SELECT [IdRecord], MIN([TrackedAt]) AS [TrackedAt] FROM [Data].[RecordTrack] RT WHERE V.[IdRecord] = RT.[IdRecord] AND [Action] = 3 AND [CodeSite] LIKE '1.__.' GROUP BY [IdRecord]) RT3
+#   OUTER APPLY (SELECT [IdRecord], MIN([TrackedAt]) AS [TrackedAt] FROM [Data].[RecordTrack] RT WHERE V.[IdRecord] = RT.[IdRecord] AND [Action] = 2 AND [CodeSite] LIKE '1.__.' GROUP BY [IdRecord]) RT4
+#   OUTER APPLY (SELECT [IdRecord], MIN([TrackedAt]) AS [TrackedAt] FROM [Data].[RecordTrack] RT WHERE V.[IdRecord] = RT.[IdRecord] AND [Action] = 3 AND [CodeSite] = '1.' GROUP BY [IdRecord]) RT5
+#   
+#   OUTER APPLY [Data].[ExpandWithSoftware] (V.[IdRecord]) SoftwareGA WHERE     
+#   V.[IdRecordType] = 1    -- nur Faelle
+#   AND V.[IsCurrent] = 1   -- nur aktuelle Version des Falls
+#   AND V.[IsActive] = 1   -- nur aktive Faelle (nicht geloescht oder verworfen)
+#   AND DISEASE71.[ReportingDate] BETWEEN '2012-03-29' AND '2014-03-28' "
+#   data <- sqlQuery(connection, query)
+#   close(connection)
+#   data
+# }
+# 
+# # Executing the function
+# #data <- getData()
+# 
+# # Saving the dataset
+# #save(data, file="rawData.RData")
+```
+
+### Loading data
+```{r}
+load(file="../Data/rawData.RData")
+
+# Other data
+DiseaseDF <- read.table(file="../Data/Diseases.csv", header=TRUE, sep=";", quote="", row.names = NULL, colClasses = "character")
+FederalstatesDF <- read.table("../Data/FederalStates.csv", header=TRUE, sep=";", row.names = NULL, colClasses = "character")
+Holidays <- read.table("../Data/Holidays.csv", header=FALSE, sep=";", row.names = NULL, colClasses = "character") %>% .[["V1"]]
+WorkingDays <- sum(isBizday(timeDate(seq(as.Date("2012/03/29"), as.Date("2014/03/28"), "days")), holidays=Holidays, wday=1:5))
+
+# Initialize variable for protocol
+protocol <- list(TotalNumberRetrieved=nrow(data))
+```
+
+# Cleaning data
+### Changing class and small changes
+```{r}
+data <- data %>% 
+  mutate_each(funs(as.Date(., format = "%Y-%m-%d")), 1:23) %>%
+  mutate_each(funs(as.character(.)), 24:32,35:36) %>%
+  mutate_each(funs(as.numeric(.)), 33:34, 37:40) %>%
+  mutate_each(funs(replace(., .=="-nicht erhoben-", NA)), 24:32,35:36) %>% 
+  mutate_each(funs(replace(., .=="ohne", NA)), 24:32,35:36) %>%
+  mutate_each(funs(replace(., .=="zOther", NA)), 24:32,35:36) %>% 
+  mutate_each(funs(replace(., .=="-kein-", NA)), 24:32,35:36) %>% 
+  mutate(Alter = ifelse(Alter<0|Alter>120, NA, Alter)) %>% 
+  mutate(SoftwareGruppeGA = factor(SoftwareGruppeGA, labels=c("Software A", "Software B", "Software C", "Software D", "SurvNet", "Software E"))) 
+```
+
+### Attach federal states
+```{r}
+data <- data %>% 
+  left_join(FederalstatesDF, by="ReportingStateName") %>% 
+  mutate(ReportingStateName=factor(FederalStateEnglish)) %>% 
+  select(-FederalStateEnglish)
+```
+
+### Attach diseases
+```{r}
+data <- data %>% 
+  left_join(DiseaseDF,by="Disease") %>% 
+  mutate(Erkrankung=factor(Disease)) %>% 
+  mutate(Disease=factor(DiseaseEnglish)) %>% 
+  select(-DiseaseEnglish)
+```
+
+### Filter diseases
+```{r}
+# Protocol
+protocol$DownloadedDiseases <- levels(data$Erkrankung)
+
+# Filter process
+data <- data %>% 
+  filter(!is.na(Disease)) %>% 
+  filter(Erkrankung %nin% c("Mumps", "Röteln", "Windpocken", "Keuchhusten")) %>% 
+  droplevels
+
+# Protocol
+protocol$AnalysedDiseases <- levels(data$Erkrankung)
+protocol$NCorrectDiseaseCategory = nrow(data)
+```
+
+### Compute FrequentDisease
+```{r}
+data <- data %>% 
+  left_join(data %>% 
+              count(Disease) %>% 
+              filter(n>10) %>% 
+              mutate(FrequentDisease= TRUE) %>% 
+              select(Disease, FrequentDisease), by="Disease")
+
+# Filter
+data <- data %>% filter(FrequentDisease)
+
+# Protocol
+protocol$TotalNumber = nrow(data)
+protocol$FilterLess10Cases = protocol$NCorrectDiseaseCategory-protocol$TotalNumber
+```
+
+
+### Compute dateOfNotification 
+```{r}
+data <- data %>% 
+    mutate(dateOfNotification = as.Date(pmin(ArztMeldungImGA, LaborMeldungImGA, EigeneErmittlungMeldungImGA, GemeinschaftP8MeldungImGA, WeiterleitungAnderesGAMeldungImGA, GemeinschaftP34MeldungImGA, AndereMeldungImGA, UnbekannteMeldeArtImGA, na.rm=TRUE), origin="1970-01-01")) 
+```
+
+### Compute Weekday
+```{r}
+data <- data %>%
+  mutate(Weekday_local = weekdays(dateOfNotification)) %>%
+  mutate(Weekday_local = factor(Weekday_local, levels=c("Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"), labels=c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"))) %>%
+  mutate(Weekday_state = weekdays(ImportLS)) %>%
+  mutate(Weekday_state = factor(Weekday_state, levels=c("Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"), labels=c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")))
+``` 
+
+
+### Compute gesetz
+```{r}
+data <- data %>% 
+  mutate(gesetz_local = factor(ifelse(Meldedatum <= as.Date("2013-03-31"), "VorGesetz", "NachGesetz"))) %>%
+  mutate(gesetz_state = factor(ifelse(ImportLS <= as.Date("2013-03-31"), "VorGesetz", "NachGesetz"))) 
+```
+
+
+### Compute LongTermSN3User
+```{r}
+data <- data %>% 
+  left_join(data %>% 
+              filter(SoftwareSN2SN3GA=="SN3") %>% 
+              filter(gesetz_local=="VorGesetz") %>% 
+              count(MeldendesGA) %>% 
+              filter(n>10) %>% 
+              mutate(longtermSN3User= TRUE) %>% 
+              select(MeldendesGA, longtermSN3User), by="MeldendesGA")
+```
+
+
+### Compute delays
+```{r}
+data <- data %>% 
+  mutate(delay_to_transmit_local = as.numeric(ExportGA - dateOfNotification)) %>%
+  mutate(delay_to_transmit_state = as.numeric(ExportLS - ImportLS)) %>% 
+  mutate(notificationProcessDelay = as.numeric(Meldedatum-dateOfNotification)) %>% 
+  mutate(total_delay = as.numeric(ExportLS-dateOfNotification))
+```
+
+### Protocol
+```{r}
+protocol$dateOfNotification=sum(!is.na(data$dateOfNotification))
+protocol$ExportGA=sum(!is.na(data$ExportGA))
+protocol$ImportLS=sum(!is.na(data$ImportLS)) 
+protocol$ExportLS=sum(!is.na(data$ExportLS)) 
+protocol$DelayLocalInitial=sum(!is.na(data$delay_to_transmit_local))
+protocol$DelayStateInitial=sum(!is.na(data$delay_to_transmit_state))
+protocol$DelayLocalUnder0=sum(data$delay_to_transmit_local<0, na.rm=TRUE)
+protocol$DelayStateUnder0=sum(data$delay_to_transmit_state<0, na.rm=TRUE)
+protocol$DelayLocalAbove183=sum(data$delay_to_transmit_local>183, na.rm=TRUE)
+protocol$DelayStateAbove183=sum(data$delay_to_transmit_state>183, na.rm=TRUE) 
+```
+
+
+### Deleting delay values that are potentially wrong
+```{r}
+data <- data %>% 
+     mutate(delay_to_transmit_local = ifelse(delay_to_transmit_local<0|delay_to_transmit_local>183, NA, delay_to_transmit_local))%>%
+     mutate(delay_to_transmit_state = ifelse(delay_to_transmit_state<0|delay_to_transmit_state>183, NA, delay_to_transmit_state))%>%
+     mutate(notificationProcessDelay = ifelse(notificationProcessDelay<0|notificationProcessDelay>183, NA, notificationProcessDelay)) %>% 
+  mutate(total_delay = ifelse(total_delay<0|total_delay>183, NA, total_delay)) 
+
+# Deleting delay values of processing delay that dont fall on a Mo-Thu and only those with SN3
+data <- data %>% 
+  mutate(notificationProcessDelay = ifelse(Weekday_local %in% c("Friday", "Saturday", "Sunday"), NA, notificationProcessDelay)) %>% 
+  mutate(notificationProcessDelay = ifelse(SoftwareSN2SN3GA=="SN2", NA, notificationProcessDelay)) %>% 
+  mutate(notificationProcessDelay = ifelse(!longtermSN3User, NA, notificationProcessDelay))
+```
+
+### Compute rangNotifications
+```{r}
+data <- data %>% 
+  left_join(data %>% 
+              count(MeldendesGA) %>% 
+              mutate(NotificationsPerWorkingDay = n/WorkingDays) %>% 
+              mutate(rangNotifications= ntile(NotificationsPerWorkingDay,4)) ,by="MeldendesGA")
+
+# We label the rangs according to meanNotificationsPerWorkingDay
+Label1 <- round(min(data$NotificationsPerWorkingDay[data$rangNotifications==1], na.rm=T),1)
+Label2 <- round(min(data$NotificationsPerWorkingDay[data$rangNotifications==2], na.rm=T),1)
+Label3 <- round(min(data$NotificationsPerWorkingDay[data$rangNotifications==3], na.rm=T),1)
+Label4 <- round(min(data$NotificationsPerWorkingDay[data$rangNotifications==4], na.rm=T),1)
+Label5 <- round(max(data$NotificationsPerWorkingDay[data$rangNotifications==4], na.rm=T),1)
+AllLabels <- c(paste(Label1, Label2, sep=" - "), 
+               paste(Label2, Label3, sep=" - "), 
+               paste(Label3, Label4, sep=" - "), 
+               paste(Label4, Label5, sep=" - "))
+
+data$rangNotifications <- factor(data$rangNotifications, labels=AllLabels)
+rm(Label1, Label2, Label3, Label4, Label5, AllLabels)
+```
+
+### Intoruce rangTransmission
+```{r}
+data <- data %>% 
+  left_join(data %>%
+              filter(gesetz_local=="VorGesetz") %>% 
+              group_by(MeldendesGA) %>% 
+              summarise(mean = mean(delay_to_transmit_local, na.rm=TRUE)) %>% 
+              mutate(rangTransmission= ntile(mean,4)) %>%
+              select(MeldendesGA, rangTransmission) 
+            ,by="MeldendesGA")
+```
+
+### Compute Agegroup
+```{r}
+data <- data %>%
+  mutate(Agegroup = findInterval(Alter, c(seq(0,100,10)))) %>% 
+  mutate(Agegroup = ifelse(Agegroup>10, 10, Agegroup)) %>% 
+  mutate(Agegroup = factor(Agegroup, labels=c("0-9", "10-19", "20-29", "30-39", "40-49", "50-59", "60-69", "70-79", "80-89", "90+")))
+```
+
+
+### Compute Yearmonth
+```{r}
+data <- data %>% 
+     mutate(Yearmonth = as.Date(paste(strftime(Meldedatum, format="%Y-%m"), "01", sep="-")))
+```
+
+### Compute correct timeley transmissions of the local
+```{r, cache=TRUE}
+data$wd0 <- isBizday(timeDate(data$dateOfNotification), holidays=Holidays, wday=1:5)
+data$wd1 <- isBizday(timeDate(data$dateOfNotification+1), holidays=Holidays, wday=1:5)
+data$wd2 <- isBizday(timeDate(data$dateOfNotification+2), holidays=Holidays, wday=1:5)
+data$wd3 <- isBizday(timeDate(data$dateOfNotification+3), holidays=Holidays, wday=1:5)
+data$wd4 <- isBizday(timeDate(data$dateOfNotification+4), holidays=Holidays, wday=1:5)
+data$wd5 <- isBizday(timeDate(data$dateOfNotification+5), holidays=Holidays, wday=1:5)
+data$wd6 <- isBizday(timeDate(data$dateOfNotification+6), holidays=Holidays, wday=1:5)
+
+data<-data %>% 
+    mutate(target=0) %>% 
+    mutate(target=ifelse(wd0 & wd6, 6,target) ) %>% 
+    mutate(target=ifelse(wd0 & wd5, 5,target) ) %>% 
+    mutate(target=ifelse(wd0 & wd4, 4,target) ) %>% 
+    mutate(target=ifelse(wd0 & wd3, 3,target) ) %>% 
+    mutate(target=ifelse(wd0 & wd2, 2,target) ) %>% 
+    mutate(target=ifelse(wd0 & wd1, 1,target) ) %>% 
+    mutate(target=ifelse(!wd0 & wd1 & wd6, 6,target) ) %>% 
+    mutate(target=ifelse(!wd0 & wd1 & wd5, 5,target) ) %>% 
+    mutate(target=ifelse(!wd0 & wd1 & wd4, 4,target) ) %>% 
+    mutate(target=ifelse(!wd0 & wd1 & wd3, 3,target) ) %>%
+    mutate(target=ifelse(!wd0 & wd1 & wd2, 2,target) ) %>%
+    mutate(target=ifelse(!wd0 & !wd1 & wd2 & wd6, 6,target) ) %>% 
+    mutate(target=ifelse(!wd0 & !wd1 & wd2 & wd5, 5,target) ) %>% 
+    mutate(target=ifelse(!wd0 & !wd1 & wd2 & wd4, 4,target) ) %>% 
+    mutate(target=ifelse(!wd0 & !wd1 & wd2 & wd3, 3,target) ) %>%
+    mutate(target=ifelse(!wd0 & !wd1 & !wd2 & wd3 & wd6, 6,target) ) %>% 
+    mutate(target=ifelse(!wd0 & !wd1 & !wd2 & wd3 & wd5, 5,target) ) %>% 
+    mutate(target=ifelse(!wd0 & !wd1 & !wd2 & wd3 & wd4, 4,target) ) %>% 
+    mutate(target=ifelse(!wd0 & !wd1 & !wd2 & !wd3 & wd4 & wd6, 6,target) ) %>% 
+    mutate(target=ifelse(!wd0 & !wd1 & !wd2 & !wd3 & wd4 & wd5, 5,target) ) %>% 
+    mutate(target=ifelse(!wd0 & !wd1 & !wd2 & !wd3 & !wd4 & wd5 & wd6, 6 ,target) ) %>%
+    mutate(target=ifelse(!wd0 & !wd1 & !wd2 & !wd3 & !wd4 & !wd5 & !wd6, NA ,target) ) 
+
+# correct transmission
+data <- data %>% 
+    mutate(korrekt_local = delay_to_transmit_local - target) %>% 
+    mutate(korrekt_local = factor(ifelse(korrekt_local<=0,1,2), labels=c("fullfilled", "notfullfilled")))
+```
+
+### Compute correct timeley transmissions of the state 
+```{r, cache=TRUE}
+data$wd0 <- isBizday(timeDate(data$ImportLS), holidays=Holidays, wday=1:5)
+data$wd1 <- isBizday(timeDate(data$ImportLS+1), holidays=Holidays, wday=1:5)
+data$wd2 <- isBizday(timeDate(data$ImportLS+2), holidays=Holidays, wday=1:5)
+data$wd3 <- isBizday(timeDate(data$ImportLS+3), holidays=Holidays, wday=1:5)
+data$wd4 <- isBizday(timeDate(data$ImportLS+4), holidays=Holidays, wday=1:5)
+data$wd5 <- isBizday(timeDate(data$ImportLS+5), holidays=Holidays, wday=1:5)
+data$wd6 <- isBizday(timeDate(data$ImportLS+6), holidays=Holidays, wday=1:5)
+
+data<-data %>% 
+    mutate(target=0) %>% 
+    mutate(target=ifelse(wd0 & wd6, 6,target) ) %>% 
+    mutate(target=ifelse(wd0 & wd5, 5,target) ) %>% 
+    mutate(target=ifelse(wd0 & wd4, 4,target) ) %>% 
+    mutate(target=ifelse(wd0 & wd3, 3,target) ) %>% 
+    mutate(target=ifelse(wd0 & wd2, 2,target) ) %>% 
+    mutate(target=ifelse(wd0 & wd1, 1,target) ) %>% 
+    mutate(target=ifelse(!wd0 & wd1 & wd6, 6,target) ) %>% 
+    mutate(target=ifelse(!wd0 & wd1 & wd5, 5,target) ) %>% 
+    mutate(target=ifelse(!wd0 & wd1 & wd4, 4,target) ) %>% 
+    mutate(target=ifelse(!wd0 & wd1 & wd3, 3,target) ) %>%
+    mutate(target=ifelse(!wd0 & wd1 & wd2, 2,target) ) %>%
+    mutate(target=ifelse(!wd0 & !wd1 & wd2 & wd6, 6,target) ) %>% 
+    mutate(target=ifelse(!wd0 & !wd1 & wd2 & wd5, 5,target) ) %>% 
+    mutate(target=ifelse(!wd0 & !wd1 & wd2 & wd4, 4,target) ) %>% 
+    mutate(target=ifelse(!wd0 & !wd1 & wd2 & wd3, 3,target) ) %>%
+    mutate(target=ifelse(!wd0 & !wd1 & !wd2 & wd3 & wd6, 6,target) ) %>% 
+    mutate(target=ifelse(!wd0 & !wd1 & !wd2 & wd3 & wd5, 5,target) ) %>% 
+    mutate(target=ifelse(!wd0 & !wd1 & !wd2 & wd3 & wd4, 4,target) ) %>% 
+    mutate(target=ifelse(!wd0 & !wd1 & !wd2 & !wd3 & wd4 & wd6, 6,target) ) %>% 
+    mutate(target=ifelse(!wd0 & !wd1 & !wd2 & !wd3 & wd4 & wd5, 5,target) ) %>% 
+    mutate(target=ifelse(!wd0 & !wd1 & !wd2 & !wd3 & !wd4 & wd5 & wd6, 6 ,target) ) %>%
+    mutate(target=ifelse(!wd0 & !wd1 & !wd2 & !wd3 & !wd4 & !wd5 & !wd6, NA ,target) ) 
+
+# correct transmission
+data <- data %>% 
+    mutate(korrekt_state = delay_to_transmit_state - target) %>% 
+    mutate(korrekt_state = factor(ifelse(korrekt_state<=0,1,2), labels=c("fullfilled", "notfullfilled")))
+
+```
+
+# Analysing data
+### Text: Data selection
+```{r dataSelection, echo=FALSE}
+protocol
+```
+
+
+### Text: How many percent SN3 users in the first month and in the last month?
+```{r percentageSN3Users}
+data %>% 
+  filter(dateOfNotification>=as.Date("2012-03-29")&dateOfNotification<=as.Date("2012-04-29")) %>% 
+  group_by(SoftwareSN2SN3GA) %>% 
+  summarise(n=n()) %>% 
+  mutate(p=percent(n/sum(n))) %>% 
+  filter(SoftwareSN2SN3GA=="SN3") %>% 
+  .[["p"]]
+
+data %>% 
+  filter(dateOfNotification>=as.Date("2014-02-28")&dateOfNotification<=as.Date("2014-03-29")) %>% 
+  group_by(SoftwareSN2SN3GA) %>% 
+  summarise(n=n()) %>% 
+  mutate(p=percent(n/sum(n))) %>% 
+  filter(SoftwareSN2SN3GA=="SN3") %>% 
+  .[["p"]]
+```
+
+
+
+### Table 1: local transmission time
+```{r table1}
+Univariable_Overall <- data %>%
+  filter(!is.na(delay_to_transmit_local)) %>% 
+  group_by(gesetz_local) %>%
+  summarise(
+    median=quantile(delay_to_transmit_local, probs = c(0.5), na.rm=TRUE),
+    q25 = quantile(delay_to_transmit_local, probs = c(0.25), na.rm=TRUE),
+    q75 = quantile(delay_to_transmit_local, probs = c(0.75), na.rm=TRUE),
+    n=n()) %>% 
+  mutate(median = paste0(n, "_", median, " (", q25, " - ", q75,")")) %>% 
+  select(gesetz_local, median) %>% 
+  spread(key=gesetz_local, value=median) %>%
+  separate(VorGesetz, into=c("n_before", "median_before"), sep="_") %>% 
+  separate(NachGesetz, into=c("n_after", "median_after"), sep="_") %>%
+  mutate(n_before=as.numeric(n_before)) %>% 
+  mutate(p_before=round(n_before*100/sum(n_before))) %>%
+  mutate(n_before = paste0(n_before, "(", p_before, ")")) %>% 
+  mutate(n_after=as.numeric(n_after)) %>% 
+  mutate(p_after=round(n_after*100/sum(n_after))) %>% 
+  mutate(n_after = paste0(n_after, "(", p_after, ")")) %>% 
+  mutate(Variable = "Overall") %>% 
+  select(Variable, n_before, median_before, n_after, median_after)  
+
+
+Univariable_GA<- data %>%
+  filter(!is.na(rangTransmission)) %>% 
+  filter(!is.na(delay_to_transmit_local)) %>% 
+  group_by(gesetz_local, rangTransmission) %>%
+  summarise(
+    median=quantile(delay_to_transmit_local, probs = c(0.5), na.rm=TRUE),
+    q25 = quantile(delay_to_transmit_local, probs = c(0.25), na.rm=TRUE),
+    q75 = quantile(delay_to_transmit_local, probs = c(0.75), na.rm=TRUE),
+    n=n()) %>% 
+  mutate(median = paste0(n, "_", median, " (", q25, " - ", q75,")")) %>% 
+  select(gesetz_local, rangTransmission, median) %>% 
+  spread(key=gesetz_local, value=median) %>%
+  separate(VorGesetz, into=c("n_before", "median_before"), sep="_") %>% 
+  separate(NachGesetz, into=c("n_after", "median_after"), sep="_") %>%
+  mutate(n_before=as.numeric(n_before)) %>% 
+  mutate(p_before=round(n_before*100/sum(n_before))) %>%
+  mutate(n_before = paste0(n_before, "(", p_before, ")")) %>% 
+  mutate(n_after=as.numeric(n_after)) %>% 
+  mutate(p_after=round(n_after*100/sum(n_after))) %>% 
+  mutate(n_after = paste0(n_after, "(", p_after, ")")) %>% 
+  mutate(rangTransmission = factor(rangTransmission, levels=c(1,2,3,4), labels=c("Local public health agency - fastes quarter", "Local public health agency - second fastest quarter", "Local public health agency - third fastest quarter", "Local public health agency - slowest quarter"))) %>%
+  select(Variable = rangTransmission, n_before, median_before, n_after, median_after)  
+
+Univariable_DayOfWeek <- data %>%
+  filter(!is.na(Weekday_local)) %>% 
+  filter(!is.na(delay_to_transmit_local)) %>% 
+  group_by(gesetz_local, Weekday_local) %>%
+  summarise(
+    median=quantile(delay_to_transmit_local, probs = c(0.5), na.rm=TRUE),
+    q25 = quantile(delay_to_transmit_local, probs = c(0.25), na.rm=TRUE),
+    q75 = quantile(delay_to_transmit_local, probs = c(0.75), na.rm=TRUE),
+    n=n()) %>% 
+  mutate(median = paste0(n, "_", median, " (", q25, " - ", q75,")")) %>% 
+  select(gesetz_local, Weekday_local, median) %>% 
+  spread(key=gesetz_local, value=median) %>%
+  separate(VorGesetz, into=c("n_before", "median_before"), sep="_") %>% 
+  separate(NachGesetz, into=c("n_after", "median_after"), sep="_") %>%
+  mutate(n_before=as.numeric(n_before)) %>% 
+  mutate(p_before=round(n_before*100/sum(n_before))) %>%
+  mutate(n_before = paste0(n_before, "(", p_before, ")")) %>% 
+  mutate(n_after=as.numeric(n_after)) %>% 
+  mutate(p_after=round(n_after*100/sum(n_after))) %>% 
+  mutate(n_after = paste0(n_after, "(", p_after, ")")) %>% 
+  select(Variable = Weekday_local, n_before, median_before, n_after, median_after)  
+
+Univariable_Software <- data %>%
+  filter(!is.na(SoftwareGruppeGA)) %>% 
+  filter(!is.na(delay_to_transmit_local)) %>% 
+  group_by(gesetz_local, SoftwareGruppeGA) %>%
+  summarise(
+    median=quantile(delay_to_transmit_local, probs = c(0.5), na.rm=TRUE),
+    q25 = quantile(delay_to_transmit_local, probs = c(0.25), na.rm=TRUE),
+    q75 = quantile(delay_to_transmit_local, probs = c(0.75), na.rm=TRUE),
+    n=n()) %>% 
+  mutate(median = paste0(n, "_", median, " (", q25, " - ", q75,")")) %>% 
+  select(gesetz_local, SoftwareGruppeGA, median) %>% 
+  spread(key=gesetz_local, value=median) %>%
+  separate(VorGesetz, into=c("n_before", "median_before"), sep="_") %>% 
+  separate(NachGesetz, into=c("n_after", "median_after"), sep="_") %>%
+  mutate(n_before=as.numeric(n_before)) %>% 
+  mutate(p_before=round(n_before*100/sum(n_before))) %>%
+  mutate(n_before = paste0(n_before, "(", p_before, ")")) %>% 
+  mutate(n_after=as.numeric(n_after)) %>% 
+  mutate(p_after=round(n_after*100/sum(n_after))) %>% 
+  mutate(n_after = paste0(n_after, "(", p_after, ")")) %>% 
+  select(Variable = SoftwareGruppeGA, n_before, median_before, n_after, median_after)
+
+Univariable_SoftwareSN2SN3GA <- data %>%
+  filter(!is.na(SoftwareSN2SN3GA)) %>% 
+  filter(!is.na(delay_to_transmit_local)) %>% 
+  group_by(gesetz_local, SoftwareSN2SN3GA) %>%
+  summarise(
+    median=quantile(delay_to_transmit_local, probs = c(0.5), na.rm=TRUE),
+    q25 = quantile(delay_to_transmit_local, probs = c(0.25), na.rm=TRUE),
+    q75 = quantile(delay_to_transmit_local, probs = c(0.75), na.rm=TRUE),
+    n=n()) %>% 
+  mutate(median = paste0(n, "_", median, " (", q25, " - ", q75,")")) %>% 
+  select(gesetz_local, SoftwareSN2SN3GA, median) %>% 
+  spread(key=gesetz_local, value=median) %>%
+  separate(VorGesetz, into=c("n_before", "median_before"), sep="_") %>% 
+  separate(NachGesetz, into=c("n_after", "median_after"), sep="_") %>%
+  mutate(n_before=as.numeric(n_before)) %>% 
+  mutate(p_before=round(n_before*100/sum(n_before))) %>%
+  mutate(n_before = paste0(n_before, "(", p_before, ")")) %>% 
+  mutate(n_after=as.numeric(n_after)) %>% 
+  mutate(p_after=round(n_after*100/sum(n_after))) %>% 
+  mutate(n_after = paste0(n_after, "(", p_after, ")")) %>% 
+  select(Variable = SoftwareSN2SN3GA, n_before, median_before, n_after, median_after)  
+
+Univariable_NotificationsPerDay <- data %>%
+  filter(!is.na(rangNotifications)) %>% 
+  filter(!is.na(delay_to_transmit_local)) %>% 
+  group_by(gesetz_local, rangNotifications) %>%
+  summarise(
+    median=quantile(delay_to_transmit_local, probs = c(0.5), na.rm=TRUE),
+    q25 = quantile(delay_to_transmit_local, probs = c(0.25), na.rm=TRUE),
+    q75 = quantile(delay_to_transmit_local, probs = c(0.75), na.rm=TRUE),
+    n=n()) %>% 
+  mutate(median = paste0(n, "_", median, " (", q25, " - ", q75,")")) %>% 
+  select(gesetz_local, rangNotifications, median) %>% 
+  spread(key=gesetz_local, value=median) %>%
+  separate(VorGesetz, into=c("n_before", "median_before"), sep="_") %>% 
+  separate(NachGesetz, into=c("n_after", "median_after"), sep="_") %>%
+  mutate(n_before=as.numeric(n_before)) %>% 
+  mutate(p_before=round(n_before*100/sum(n_before))) %>%
+  mutate(n_before = paste0(n_before, "(", p_before, ")")) %>% 
+  mutate(n_after=as.numeric(n_after)) %>% 
+  mutate(p_after=round(n_after*100/sum(n_after))) %>% 
+  mutate(n_after = paste0(n_after, "(", p_after, ")")) %>% 
+  select(Variable = rangNotifications, n_before, median_before, n_after, median_after)
+
+EmptyLine<-data.frame(Variable=" ", n_before=" ", median_before=" ", n_after=" ", median_after=" ")
+
+TableLocal <- rbind(Univariable_Overall, EmptyLine, 
+                    Univariable_GA, EmptyLine,
+                    Univariable_Software, EmptyLine, 
+                    Univariable_SoftwareSN2SN3GA, EmptyLine, 
+                    Univariable_DayOfWeek, EmptyLine,
+                    Univariable_NotificationsPerDay)
+```
+
+
+### Multivariable model
+```{r}
+if (!require("MASS")) install.packages('MASS'); require("MASS")
+select <- dplyr::select
+data$SoftwareGruppeGA <- relevel(data$SoftwareGruppeGA, ref = "SurvNet")
+data$Disease <- relevel(data$Disease, ref = "norovirus gastroenteritis")
+
+formula <- delay_to_transmit_local ~  
+  Weekday_local +
+  gesetz_local +                          
+  rangNotifications +
+  Disease +
+  SoftwareGruppeGA +
+  SoftwareSN2SN3GA 
+
+BinregModel<- glm.nb(formula = formula, data=data)
+
+BinregDF<-data.frame(coef(summary(BinregModel))) %>% 
+  add_rownames() %>% 
+  mutate(Exp = round(exp(Estimate),2)) %>%
+  mutate(expLCI = round(exp(Estimate-1.96*Std..Error),2)) %>% 
+  mutate(expUCI = round(exp(Estimate+1.96*Std..Error),2)) %>% 
+  mutate(CI = paste(expLCI, expUCI, sep="-")) %>% 
+  rename(p=Pr...z.., Variable=rowname) %>% 
+  mutate(p = round(p,3)) %>% 
+  filter(!grepl("Disease", Variable)) %>% 
+  mutate(Variable=ifelse(grepl("Weekday_local", Variable), substring(Variable, 14), Variable)) %>%
+  mutate(Variable=ifelse(grepl("rangNotifications", Variable), substring(Variable, 18), Variable)) %>% 
+  mutate(Variable=ifelse(grepl("SoftwareGruppeGA", Variable), substring(Variable, 17), Variable)) %>%
+  mutate(Variable=ifelse(grepl("SoftwareSN2SN3GA", Variable), substring(Variable, 17), Variable)) %>%
+  mutate(Variable=ifelse(grepl("gesetz_local", Variable), substring(Variable, 13), Variable)) %>%
+  select(Variable, Exp, CI)
+
+
+datatable(TableLocal %>% left_join(BinregDF, by="Variable"))
+```
+
+
+
+
+### Text: Within one working day local
+```{r LocalWithinOneWorkingDay}
+datatable(data %>% 
+  filter(gesetz_local=="NachGesetz") %>%
+  filter(!is.na(korrekt_local)) %>% 
+  count(korrekt_local) %>% 
+  mutate(p=round(n*100/sum(n)))
+)
+```
+
+
+### Table 2: Diseases
+```{r table2}
+BinregDiseaseDF<-data.frame(coef(summary(BinregModel))) %>% 
+  add_rownames() %>% 
+  mutate(Exp = round(exp(Estimate),2)) %>%
+  mutate(expLCI = round(exp(Estimate-1.96*Std..Error),2)) %>% 
+  mutate(expUCI = round(exp(Estimate+1.96*Std..Error),2)) %>% 
+  mutate(CI = paste(expLCI, expUCI, sep="-")) %>% 
+  rename(p=Pr...z.., Variable=rowname) %>% 
+  mutate(p = round(p,3)) %>% 
+  mutate(Variable=ifelse(grepl("Disease", Variable), substring(Variable, 8), Variable)) %>% 
+  select(Variable, Exp, CI)
+ 
+
+DiseasesLocal <- data %>%
+  filter(!is.na(Disease)) %>% 
+  filter(!is.na(delay_to_transmit_local)) %>% 
+  group_by(gesetz_local, Disease) %>%
+  summarise(
+    median=quantile(delay_to_transmit_local, probs = c(0.5), na.rm=TRUE),
+    q25 = quantile(delay_to_transmit_local, probs = c(0.25), na.rm=TRUE),
+    q75 = quantile(delay_to_transmit_local, probs = c(0.75), na.rm=TRUE),
+    n=n()) %>% 
+  mutate(median = paste0(n, "_", median, " (", q25, " - ", q75,")")) %>% 
+  select(gesetz_local, Disease, median) %>% 
+  spread(key=gesetz_local, value=median) %>%
+  separate(VorGesetz, into=c("n_before", "median_before"), sep="_") %>% 
+  separate(NachGesetz, into=c("n_after", "median_after"), sep="_") %>%
+  mutate(n_before=as.numeric(n_before)) %>% 
+  mutate(p_before=round(n_before*100/sum(n_before))) %>%
+  mutate(n_before = paste0(n_before, "(", p_before, ")")) %>% 
+  mutate(n_after=as.numeric(n_after)) %>% 
+  mutate(p_after=round(n_after*100/sum(n_after))) %>% 
+  mutate(n_after = paste0(n_after, "(", p_after, ")")) %>% 
+  select(Variable = Disease, n_before, median_before, n_after, median_after)  
+
+
+DiseasesState <- data %>%
+  filter(!is.na(Disease)) %>% 
+  filter(!is.na(delay_to_transmit_state)) %>% 
+  group_by(gesetz_state, Disease) %>%
+  summarise(
+    median=quantile(delay_to_transmit_state, probs = c(0.5), na.rm=TRUE),
+    q25 = quantile(delay_to_transmit_state, probs = c(0.25), na.rm=TRUE),
+    q75 = quantile(delay_to_transmit_state, probs = c(0.75), na.rm=TRUE),
+    n=n()) %>% 
+  mutate(median = paste0(n, "_", median, " (", q25, " - ", q75,")")) %>% 
+  select(gesetz_state, Disease, median) %>% 
+  spread(key=gesetz_state, value=median) %>%
+  separate(VorGesetz, into=c("n_before", "median_before"), sep="_") %>% 
+  separate(NachGesetz, into=c("n_after", "median_after"), sep="_") %>%
+  mutate(n_before=as.numeric(n_before)) %>% 
+  mutate(p_before=round(n_before*100/sum(n_before))) %>%
+  mutate(n_before = paste0(n_before, "(", p_before, ")")) %>% 
+  mutate(n_after=as.numeric(n_after)) %>% 
+  mutate(p_after=round(n_after*100/sum(n_after))) %>% 
+  mutate(n_after = paste0(n_after, "(", p_after, ")")) %>% 
+  select(Variable=Disease, n_before, median_before, n_after, median_after)  
+
+datatable(
+  data %>% 
+  count(Disease) %>% 
+  mutate(p=percent(n/sum(n))) %>% 
+  mutate(total_percent = paste0(n," (", p, ")")) %>% 
+  select(Disease, total_percent) %>% 
+  full_join(DiseasesLocal  %>% select(Variable, median_local=median_after), by=c("Disease"="Variable")) %>% 
+  left_join(BinregDiseaseDF, by=c("Disease"="Variable")) %>% 
+  full_join(DiseasesState %>% select(Variable, median_state=median_after), by=c("Disease"="Variable"))
+)
+```
+
+
+### Text: state transmission time
+```{r table3}
+Univariable_Overall_state  <- data %>%
+  filter(!is.na(delay_to_transmit_state)) %>% 
+  group_by(gesetz_state) %>%
+  summarise(
+    median=quantile(delay_to_transmit_state, probs = c(0.5), na.rm=TRUE),
+    q25 = quantile(delay_to_transmit_state, probs = c(0.25), na.rm=TRUE),
+    q75 = quantile(delay_to_transmit_state, probs = c(0.75), na.rm=TRUE),
+    n=n()) %>% 
+  mutate(median = paste0(n, "_", median, " (", q25, " - ", q75,")")) %>% 
+  select(gesetz_state, median) %>% 
+  spread(key=gesetz_state, value=median) %>%
+  separate(VorGesetz, into=c("n_before", "median_before"), sep="_") %>% 
+  separate(NachGesetz, into=c("n_after", "median_after"), sep="_") %>%
+  mutate(n_before=as.numeric(n_before)) %>% 
+  mutate(p_before=round(n_before*100/sum(n_before))) %>%
+  mutate(n_before = paste0(n_before, "(", p_before, ")")) %>% 
+  mutate(n_after=as.numeric(n_after)) %>% 
+  mutate(p_after=round(n_after*100/sum(n_after))) %>% 
+  mutate(n_after = paste0(n_after, "(", p_after, ")")) %>% 
+  mutate(Variable = "Overall") %>% 
+  select(Variable, n_before, median_before, n_after, median_after)  
+
+Univariable_BL_state  <- data %>%
+  filter(!is.na(ReportingStateName)) %>% 
+  filter(!is.na(delay_to_transmit_state)) %>% 
+  group_by(gesetz_state, ReportingStateName) %>%
+  summarise(
+    median=quantile(delay_to_transmit_state, probs = c(0.5), na.rm=TRUE),
+    q25 = quantile(delay_to_transmit_state, probs = c(0.25), na.rm=TRUE),
+    q75 = quantile(delay_to_transmit_state, probs = c(0.75), na.rm=TRUE),
+    n=n()) %>% 
+  mutate(median = paste0(n, "_", median, " (", q25, " - ", q75,")")) %>% 
+  select(gesetz_state, ReportingStateName, median) %>% 
+  spread(key=gesetz_state, value=median) %>%
+  separate(VorGesetz, into=c("n_before", "median_before"), sep="_") %>% 
+  separate(NachGesetz, into=c("n_after", "median_after"), sep="_") %>%
+  mutate(n_before=as.numeric(n_before)) %>% 
+  mutate(p_before=round(n_before*100/sum(n_before))) %>%
+  mutate(n_before = paste0(n_before, "(", p_before, ")")) %>% 
+  mutate(n_after=as.numeric(n_after)) %>% 
+  mutate(p_after=round(n_after*100/sum(n_after))) %>% 
+  mutate(n_after = paste0(n_after, "(", p_after, ")")) %>% 
+  select(Variable = ReportingStateName, n_before, median_before, n_after, median_after)  
+
+Univariable_DayOfWeek_state  <- data %>%
+  filter(!is.na(Weekday_state)) %>% 
+  filter(!is.na(delay_to_transmit_state)) %>% 
+  group_by(gesetz_state, Weekday_state) %>%
+  summarise(
+    median=quantile(delay_to_transmit_state, probs = c(0.5), na.rm=TRUE),
+    q25 = quantile(delay_to_transmit_state, probs = c(0.25), na.rm=TRUE),
+    q75 = quantile(delay_to_transmit_state, probs = c(0.75), na.rm=TRUE),
+    n=n()) %>% 
+  mutate(median = paste0(n, "_", median, " (", q25, " - ", q75,")")) %>% 
+  select(gesetz_state, Weekday_state, median) %>% 
+  spread(key=gesetz_state, value=median) %>%
+  separate(VorGesetz, into=c("n_before", "median_before"), sep="_") %>% 
+  separate(NachGesetz, into=c("n_after", "median_after"), sep="_") %>%
+  mutate(n_before=as.numeric(n_before)) %>% 
+  mutate(p_before=round(n_before*100/sum(n_before, na.rm=TRUE))) %>%
+  mutate(n_before = paste0(n_before, "(", p_before, ")")) %>% 
+  mutate(n_after=as.numeric(n_after)) %>% 
+  mutate(p_after=round(n_after*100/sum(n_after))) %>% 
+  mutate(n_after = paste0(n_after, "(", p_after, ")")) %>% 
+  select(Variable = Weekday_state, n_before, median_before, n_after, median_after)  
+
+
+EmptyLine<-data.frame(Variable=" ", n_before=" ", median_before=" ", n_after=" ", median_after=" ")
+
+
+TableState <- rbind(Univariable_Overall_state, 
+                       Univariable_BL_state , 
+                       Univariable_DayOfWeek_state) 
+
+
+datatable(TableState)
+```
+
+### Text: Within one working day state
+```{r StateWithinOneWorkingDay}
+datatable(
+  data %>% 
+  filter(gesetz_state=="NachGesetz") %>%
+  filter(!is.na(korrekt_state)) %>% 
+  count(korrekt_state) %>% 
+  mutate(p=round(n*100/sum(n)))
+)
+```
+
+
+### Text: Notification to process time
+```{r NotificationToProcessTime}
+datatable(
+  data %>% 
+  filter(!is.na(notificationProcessDelay)) %>% 
+  group_by(gesetz_local) %>% 
+  summarise(n=n(), median=median(notificationProcessDelay), mn=mean(notificationProcessDelay), sd=sd(notificationProcessDelay)) %>% 
+  mutate(se=sd/sqrt(n),LCI=mn+qnorm(0.025)*se,UCI=mn+qnorm(0.975)*se)
+)
+```
+
+
+
+### Graph 2: Mean delays
+```{r graph2}
+plotLocal <- data %>% 
+  filter(Yearmonth>=as.Date("2012-04-01")&Yearmonth<as.Date("2014-04-01")) %>% 
+  select(Yearmonth, delay_to_transmit_local) %>% na.omit %>% 
+  group_by(Yearmonth) %>% 
+  summarise(n=n(),mn=mean(delay_to_transmit_local), sd=sd(delay_to_transmit_local)) %>% 
+  mutate(se=sd/sqrt(n),LCI=mn+qnorm(0.025)*se,UCI=mn+qnorm(0.975)*se) %>% 
+  ggplot(aes(x=Yearmonth, y=mn)) +
+  geom_bar(stat="identity", fill="steelblue") +
+  geom_errorbar(aes(ymin=LCI, ymax=UCI))+
+  theme_classic(base_size = 16) +
+  geom_vline(xintercept=as.numeric(as.Date("2013-03-01")), linetype="dashed")+
+  scale_x_date(date_break="3 months", date_labels="%Y-%m") +
+  labs(x="Time in months", y="local trans- \n mission time")
+  theme(legend.position="none",plot.margin=unit(c(0,0,0,0), "mm")) 
+
+plotState <- data %>% 
+  filter(Yearmonth>=as.Date("2012-04-01")&Yearmonth<as.Date("2014-04-01")) %>% 
+  select(Yearmonth, delay_to_transmit_state) %>% na.omit %>% 
+  group_by(Yearmonth) %>% 
+  summarise(n=n(),mn=mean(delay_to_transmit_state), sd=sd(delay_to_transmit_state)) %>% 
+  mutate(se=sd/sqrt(n),LCI=mn+qnorm(0.025)*se,UCI=mn+qnorm(0.975)*se) %>% 
+  ggplot(aes(x=Yearmonth, y=mn)) +
+  geom_bar(stat="identity", fill="steelblue") +
+  geom_errorbar(aes(ymin=LCI, ymax=UCI))+
+  theme_classic(base_size = 16) +
+  geom_vline(xintercept=as.numeric(as.Date("2013-03-01")), linetype="dashed")+
+  scale_x_date(date_break="3 months", date_labels="%Y-%m") +
+  scale_y_continuous(limits=c(0,8))+
+  labs(x="Time in months", y="state trans- \n mission time")
+  theme(legend.position="none",plot.margin=unit(c(0,0,0,0), "mm"))   
+  
+plotNP <- data %>% 
+  filter(longtermSN3User) %>% 
+  filter(SoftwareSN2SN3GA=="SN3") %>% 
+  filter(Yearmonth>=as.Date("2012-04-01")&Yearmonth<as.Date("2014-04-01")) %>% 
+  group_by(Yearmonth) %>% 
+  summarise(n=n(),mn=mean(notificationProcessDelay, na.rm=T), sd=sd(notificationProcessDelay, na.rm=T)) %>% 
+  mutate(se=sd/sqrt(n),LCI=mn+qnorm(0.025)*se,UCI=mn+qnorm(0.975)*se) %>% 
+  ggplot(aes(x=Yearmonth, y=mn)) +
+  geom_bar(stat="identity", fill="steelblue") +
+  geom_errorbar(aes(ymax = UCI, ymin=LCI)) +
+  theme_classic(base_size = 16) +
+  geom_vline(xintercept=as.numeric(as.Date("2013-03-01")), linetype="dashed")+
+  scale_x_date(date_break="3 months", date_labels="%Y-%m") +
+  scale_y_continuous(limits=c(0,8))+
+  labs(x="Time in months", y="mean notification \n process time")
+
+timeplot <- grid.arrange(plotLocal, plotState, plotNP, ncol=1) 
+
+
+setEPS()
+postscript("../Figures/figure2.eps")
+ grid.arrange(plotLocal, plotState, plotNP, ncol=1)
+dev.off()
+
+
+# svg("../Figures/figure2.svg", onefile = TRUE)
+#   grid.arrange(plotLocal, plotState, plotNP, ncol=1)
+#   dev.off()
+
+
+# pdf("../Figures/figure2.pdf", width = 10, height = 8) # Open a new pdf file
+# grid.arrange(plotLocal, plotState, plotNP, ncol=1)
+# dev.off()
+```
+
+
+
+### Text: Quality and workload of data
+```{r QualityWorkload, eval=TRUE, echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+datatable(
+data %>% 
+  group_by(gesetz_local) %>% 
+  summarise(n_total=n(), n_notNA = sum(!is.na(Status_33_36_42)), p=n_notNA/n_total) %>% 
+  mutate(LCI = p - 1.96*sqrt((p*(1-p))/n_total),
+         UCI = p + 1.96*sqrt((p*(1-p))/n_total))
+)
+
+datatable(
+data %>% 
+  group_by(gesetz_local) %>% 
+  summarise(n_total=n(), n_notNA = sum(!is.na(Erkrankungsbeginn)), p=n_notNA/n_total) %>% 
+  mutate(LCI = p - 1.96*sqrt((p*(1-p))/n_total),
+         UCI = p + 1.96*sqrt((p*(1-p))/n_total))
+)
+
+datatable(
+  data %>% 
+  group_by(gesetz_local) %>% 
+  summarise(n=n(), MeanVersionen = mean(VersionNo, na.rm=TRUE), sd=sd(VersionNo, na.rm=T)) %>% 
+  mutate(se=sd/sqrt(n),LCI=MeanVersionen+qnorm(0.025)*se,UCI=MeanVersionen+qnorm(0.975)*se) 
+)
+```
+
+
+
+### Graph 3: Quality and workload
+```{r graph3}
+plotCommunity <- data %>% 
+  filter(Yearmonth>=as.Date("2012-04-01")&Yearmonth<as.Date("2014-04-01")) %>% 
+  group_by(Yearmonth) %>% 
+  summarise(n_total=n(), n_notNA = sum(!is.na(Status_33_36_42)), p=n_notNA/n_total) %>% 
+  mutate(LCI = p - 1.96*sqrt((p*(1-p))/n_total),
+         UCI = p + 1.96*sqrt((p*(1-p))/n_total)) %>% 
+  select(Yearmonth, p, LCI, UCI)  %>% 
+  ggplot(aes(x=Yearmonth, y=p))  + 
+  geom_line(stat="identity", color="darkgreen") + 
+  geom_ribbon(aes(ymin=LCI, ymax=UCI), alpha = 0.3, fill="darkgreen") +
+  theme_classic(base_size = 16) +
+  theme(legend.position="none",plot.margin=unit(c(0,0,0,0), "mm")) +
+  theme(axis.text.x=element_blank(),axis.ticks.x=element_blank(),axis.title.x=element_blank())+
+  scale_y_continuous(limits=c(0.1, 0.3)) +
+  geom_vline(xintercept=as.numeric(as.Date("2013-03-01")), linetype="dashed")+
+  scale_x_date(date_break="3 months", date_labels="%Y-%m") +
+  labs(x="Time in months", y="percent with \n community service")
+
+plotOnset <- data %>% 
+  filter(Yearmonth>=as.Date("2012-04-01")&Yearmonth<as.Date("2014-04-01")) %>% 
+  group_by(Yearmonth) %>% 
+  summarise(n_total=n(), n_notNA = sum(!is.na(Erkrankungsbeginn)), p=n_notNA/n_total) %>% 
+  mutate(LCI = p - 1.96*sqrt((p*(1-p))/n_total),
+         UCI = p + 1.96*sqrt((p*(1-p))/n_total)) %>% 
+  select(Yearmonth, p, LCI, UCI) %>%
+  ggplot(aes(x=Yearmonth, y=p))  + 
+  geom_line(stat="identity", color="red") + 
+  geom_ribbon(aes(ymin=LCI, ymax=UCI), alpha = 0.3, fill="red") +
+  theme_classic(base_size = 16) +
+  theme(legend.position="none", plot.margin=unit(c(0,0,0,3), "mm")) +
+  theme(axis.text.x=element_blank(),axis.ticks.x=element_blank(),axis.title.x=element_blank())+
+  scale_y_continuous(limits=c(0.6, 0.9)) +
+  geom_vline(xintercept=as.numeric(as.Date("2013-03-01")), linetype="dashed")+
+  scale_x_date(date_break="3 months", date_labels="%Y-%m") +
+  labs(x="Time in months", y="percent with \n onset of disease")
+
+PlotMeanAnzahlVersionen <- data %>% 
+  filter(Yearmonth>=as.Date("2012-04-01")&Yearmonth<as.Date("2014-04-01")) %>% 
+  group_by(Yearmonth) %>% 
+  summarise(n=n(), MeanVersionen = mean(VersionNo, na.rm=TRUE), sd=sd(VersionNo, na.rm=T)) %>% 
+  mutate(se=sd/sqrt(n),LCI=MeanVersionen+qnorm(0.025)*se,UCI=MeanVersionen+qnorm(0.975)*se) %>% 
+  ggplot(aes(x=Yearmonth, y=MeanVersionen)) +
+  geom_line(color="#FF9933") +
+  geom_ribbon(aes(ymin=LCI, ymax=UCI), alpha = 0.3, fill="#FF9933") +
+  theme_classic(base_size = 16) +
+  scale_y_continuous(limits=c(0.5,2.5), name="mean number\n of versions") +
+  scale_x_date(date_break="3 months", date_labels="%Y-%m", name="time in months") +
+  theme(plot.margin=unit(c(0,0,0,3), "mm"))+
+  geom_vline(xintercept=as.numeric(as.Date("2013-03-01")), linetype="dashed")
+
+
+figure3 <- grid.arrange(plotCommunity, plotOnset, PlotMeanAnzahlVersionen, ncol=1) 
+
+
+setEPS()
+postscript("../Figures/figure3.eps")
+ grid.arrange(plotLocal, plotState, plotNP, ncol=1)
+dev.off()
+
+
+# svg("../Figures/figure3.svg", onefile = TRUE)
+#  grid.arrange(plotCommunity, plotOnset, PlotMeanAnzahlVersionen, ncol=1)
+#   dev.off()
+
+# pdf("../Figures/figure3.pdf", width = 10, height = 8) # Open a new pdf file
+# grid.arrange(plotCommunity, plotOnset, PlotMeanAnzahlVersionen, ncol=1)
+# dev.off()
+```
+
+
+### Data not shown: age and sex
+```{r}
+datatable(
+data %>%
+  filter(!is.na(Geschlecht)) %>% 
+  filter(!is.na(delay_to_transmit_local)) %>% 
+  group_by(gesetz_local, Geschlecht) %>%
+  summarise(
+    median=quantile(delay_to_transmit_local, probs = c(0.5), na.rm=TRUE),
+    q25 = quantile(delay_to_transmit_local, probs = c(0.25), na.rm=TRUE),
+    q75 = quantile(delay_to_transmit_local, probs = c(0.75), na.rm=TRUE),
+    n=n()) %>% 
+  mutate(median = paste0(n, "_", median, " (", q25, " - ", q75,")")) %>% 
+  select(gesetz_local, Geschlecht, median) %>% 
+  spread(key=gesetz_local, value=median) %>%
+  separate(VorGesetz, into=c("n_before", "median_before"), sep="_") %>% 
+  separate(NachGesetz, into=c("n_after", "median_after"), sep="_") %>%
+  mutate(n_before=as.numeric(n_before)) %>% 
+  mutate(p_before=round(n_before*100/sum(n_before))) %>%
+  mutate(n_before = paste0(n_before, "(", p_before, ")")) %>% 
+  mutate(n_after=as.numeric(n_after)) %>% 
+  mutate(p_after=round(n_after*100/sum(n_after))) %>% 
+  mutate(n_after = paste0(n_after, "(", p_after, ")")) %>% 
+  select(Variable = Geschlecht, n_before, median_before, n_after, median_after)
+)
+
+
+datatable(
+Univariable_Agegroup <-  data %>%
+  filter(!is.na(Agegroup)) %>% 
+  filter(!is.na(delay_to_transmit_local)) %>% 
+  group_by(gesetz_local, Agegroup) %>%
+  summarise(
+    median=quantile(delay_to_transmit_local, probs = c(0.5), na.rm=TRUE),
+    q25 = quantile(delay_to_transmit_local, probs = c(0.25), na.rm=TRUE),
+    q75 = quantile(delay_to_transmit_local, probs = c(0.75), na.rm=TRUE),
+    n=n()) %>% 
+  mutate(median = paste0(n, "_", median, " (", q25, " - ", q75,")")) %>% 
+  select(gesetz_local, Agegroup, median) %>% 
+  spread(key=gesetz_local, value=median) %>%
+  separate(VorGesetz, into=c("n_before", "median_before"), sep="_") %>% 
+  separate(NachGesetz, into=c("n_after", "median_after"), sep="_") %>%
+  mutate(n_before=as.numeric(n_before)) %>% 
+  mutate(p_before=round(n_before*100/sum(n_before))) %>%
+  mutate(n_before = paste0(n_before, "(", p_before, ")")) %>% 
+  mutate(n_after=as.numeric(n_after)) %>% 
+  mutate(p_after=round(n_after*100/sum(n_after))) %>% 
+  mutate(n_after = paste0(n_after, "(", p_after, ")")) %>% 
+  select(Variable = Agegroup, n_before, median_before, n_after, median_after)
+)
+```
+
+### Session Info
+```{r}
+sessionInfo()
+```
+
